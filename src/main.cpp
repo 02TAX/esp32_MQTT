@@ -7,6 +7,26 @@
 
 using namespace std;
 
+class Equipment{
+  private:
+    String Name;
+    int Pin;
+  public:
+    // Equipment(int val) : Pin(val) {}
+    void Equipment_name(String name_set) {
+      Name = name_set;
+    }
+    void Equipment_pin(int pin_set) {
+      Pin = pin_set;
+    }
+    String getName(){
+          return Name;
+      }
+    int getPin(){
+          return Pin;
+      }
+};
+
 //Pin_set
 int led_pin = 12;
 
@@ -32,10 +52,17 @@ void connectToMQTT();
 void mqttCallback(char *mqtt_topic, byte *payload, unsigned int length);
 String Json_msg(char *msg);
 int Json_rcv(char *payload,std::vector<String> &Equipment_Control);
+void Boot_Equipment_list(std::vector<Equipment> &Equipment_list,String name,int pin);
 
 //Equipment_list
-const std::vector<String> Equipment_list{"window","motor","LED"};
+std::vector<Equipment> Equipment_list;
 
+void Boot_Equipment_list(std::vector<Equipment> &Equipment_list,String name,int pin){
+  Equipment equipment;
+  equipment.Equipment_name(name);
+  equipment.Equipment_pin(pin);
+  Equipment_list.push_back(equipment);
+}
 
 void connectToWiFi() {
     WiFi.begin(ssid, password);
@@ -85,14 +112,6 @@ int Json_rcv(char *payload,std::vector<String> &Equipment_Control){
       {          
         String Equipment,Control;
         Serial.printf("Rcv Message: %s,%s\n",pEquipment->valuestring,pControl->valuestring);
-        // if(strcmp(pEquipment->valuestring,"OPEN")==0){
-        //   Serial.printf("State: Successfully opened!\n");
-        //   return HIGH;
-        // }
-        // if(strcmp(pEquipment->valuestring,"CLOSE")==0){
-        //   Serial.printf("State: Successfully closed!\n");
-        //   return LOW;
-        // }
         Equipment_Control[0] = pEquipment->valuestring;
         Equipment_Control[1] = pControl->valuestring;
 
@@ -104,18 +123,26 @@ int Json_rcv(char *payload,std::vector<String> &Equipment_Control){
   return -1;
 }
 
-void device(std::vector<String> &Equipment_Control,const std::vector<String> Equipment_list){
+void device(std::vector<String> &Equipment_Control,std::vector<Equipment> Equipment_list){
 
   int Device_number = 0;
   for (int i = 0; i < Equipment_list.size(); i++)
   {
-    if(strcmp(Equipment_Control[0].c_str(),Equipment_list[i].c_str()) == 0){
+    if(strcmp(Equipment_Control[0].c_str(),Equipment_list[i].getName().c_str()) == 0){
       Device_number = i;
-      Serial.printf("Device_number: %d\n",Device_number);
+      if (Equipment_Control[1] == "ON")
+      {
+        digitalWrite(Equipment_list[i].getPin(),HIGH);
+      }
+      // Serial.printf("Device_number: %d\n",Device_number);
+      else if (Equipment_Control[1] == "OFF")
+      {
+        digitalWrite(Equipment_list[i].getPin(),LOW);
+      }
     }
     else
     {
-      Serial.printf("error!");
+      Serial.printf("error!\n");
     }
   }
 }
@@ -169,6 +196,10 @@ void mqttCallback(char *mqtt_topic, byte *payload, unsigned int length) {
 void setup() {
   //驱动的setup
   pinMode(led_pin,OUTPUT);
+  Boot_Equipment_list(Equipment_list,"motor",1);
+  Boot_Equipment_list(Equipment_list,"window",5);
+  Boot_Equipment_list(Equipment_list,"LED",led_pin);
+
   Serial.begin(9600);
 
   connectToWiFi();
