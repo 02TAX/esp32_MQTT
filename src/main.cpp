@@ -31,11 +31,14 @@ class Equipment{
 int led_pin = 12;
 
 // WiFi
-const char *ssid = "DoubleQ"; // Enter your WiFi name
-const char *password = "Doubleq.com";  // Enter WiFi password
+// const char *ssid = "DoubleQ"; // Enter your WiFi name
+// const char *password = "Doubleq.com";  // Enter WiFi password
+const char *ssid = "ziroom304"; // Enter your WiFi name
+const char *password = "4001001111";  // Enter WiFi password
 
 // MQTT Broker
-const char *mqtt_broker = "192.168.3.116";
+// const char *mqtt_broker = "192.168.3.116";
+const char *mqtt_broker = "192.168.0.120";
 const char *mqtt_topic_send  = "esp32/send";
 const char *mqtt_topic_recv ="esp32/recv";
 const char *mqtt_username = "emqx";
@@ -57,10 +60,14 @@ void Boot_Equipment_list(std::vector<Equipment> &Equipment_list,String name,int 
 //Equipment_list
 std::vector<Equipment> Equipment_list;
 
-void Boot_Equipment_list(std::vector<Equipment> &Equipment_list,String name,int pin){
+//创建设备表(包含每一个的具体信息:设备名、引脚、引脚模式)
+void Boot_Equipment_list(std::vector<Equipment> &Equipment_list,String name,int pin,uint8_t mode){
   Equipment equipment;
+
   equipment.Equipment_name(name);
   equipment.Equipment_pin(pin);
+  pinMode(pin,mode);  
+
   Equipment_list.push_back(equipment);
 }
 
@@ -116,7 +123,6 @@ int Json_rcv(char *payload,std::vector<String> &Equipment_Control){
         Equipment_Control[1] = pControl->valuestring;
 
         return 0;
-
       }
     }
   }
@@ -185,6 +191,7 @@ void mqttCallback(char *mqtt_topic, byte *payload, unsigned int length) {
       }
       Serial.printf("Equipment: %s\n",Equipment);
       Serial.printf("Control: %s\n",Control);
+      //设备驱动(获取MQTT发来的控制设备名和控制指令)
       device(Equipment_Control,Equipment_list);
     }
     // for (unsigned int i = 0; i < length; i++) {
@@ -194,11 +201,10 @@ void mqttCallback(char *mqtt_topic, byte *payload, unsigned int length) {
 }
 
 void setup() {
-  //驱动的setup
-  pinMode(led_pin,OUTPUT);
-  Boot_Equipment_list(Equipment_list,"motor",1);
-  Boot_Equipment_list(Equipment_list,"window",5);
-  Boot_Equipment_list(Equipment_list,"LED",led_pin);
+  //驱动的setup以及创建设备的类（具体信息）
+  // Boot_Equipment_list(Equipment_list,"motor",1);
+  // Boot_Equipment_list(Equipment_list,"window",5);
+  Boot_Equipment_list(Equipment_list,"LED",led_pin,OUTPUT);
 
   Serial.begin(9600);
 
