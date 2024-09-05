@@ -1,9 +1,13 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <DHT.h>
 #include <PubSubClient.h>
 #include <mqtt_client.h>
 #include <cJSON.h>
 #include <vector>
+#include <HTTPClient.h>
+#include "Baidu_ASR.h"
+#include <nlohmann/json.hpp>
 
 using namespace std;
 
@@ -28,17 +32,23 @@ class Equipment{
 };
 
 //Pin_set
-int led_pin = 12;
+unsigned int led_pin = 2;
+unsigned int DHT_pin = 10;
+unsigned int key = 0;
+unsigned int ADC = 39;
+
+//sensor 
+DHT dht(DHT_pin, DHT11);
 
 // WiFi
-// const char *ssid = "DoubleQ"; // Enter your WiFi name
-// const char *password = "Doubleq.com";  // Enter WiFi password
-const char *ssid = "ziroom304"; // Enter your WiFi name
-const char *password = "4001001111";  // Enter WiFi password
+const char *ssid = "DoubleQ"; // Enter your WiFi name
+const char *password = "Doubleq.com";  // Enter WiFi password
+// const char *ssid = "ziroom304"; // Enter your WiFi name
+// const char *password = "4001001111";  // Enter WiFi password
 
 // MQTT Broker
-// const char *mqtt_broker = "192.168.3.116";
-const char *mqtt_broker = "192.168.0.120";
+const char *mqtt_broker = "192.168.3.116";
+// const char *mqtt_broker = "192.168.0.120";
 const char *mqtt_topic_send  = "esp32/send";
 const char *mqtt_topic_recv ="esp32/recv";
 const char *mqtt_username = "emqx";
@@ -49,16 +59,23 @@ const int mqtt_port = 1883;
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
 
+
 // Function Declarations
 void connectToWiFi();
 void connectToMQTT();
 void mqttCallback(char *mqtt_topic, byte *payload, unsigned int length);
-String Json_msg(char *msg);
+String Json_msg(char *sensor_name,char *msg);
 int Json_rcv(char *payload,std::vector<String> &Equipment_Control);
 void Boot_Equipment_list(std::vector<Equipment> &Equipment_list,String name,int pin);
+void gain_token(void);
+
+String Baidu_msg; //百度语音识别结果
+char data_json[45000]; 
+hw_timer_t * timer = NULL;
 
 //Equipment_list
 std::vector<Equipment> Equipment_list;
+
 
 //创建设备表(包含每一个的具体信息:设备名、引脚、引脚模式)
 void Boot_Equipment_list(std::vector<Equipment> &Equipment_list,String name,int pin,uint8_t mode){
@@ -66,8 +83,11 @@ void Boot_Equipment_list(std::vector<Equipment> &Equipment_list,String name,int 
 
   equipment.Equipment_name(name);
   equipment.Equipment_pin(pin);
-  pinMode(pin,mode);  
-
+  
+  if (mode != NULL)
+  {
+    pinMode(pin,mode); 
+  }
   Equipment_list.push_back(equipment);
 }
 
@@ -78,30 +98,33 @@ void connectToWiFi() {
         delay(500);
         Serial.print(".");
     }
-    Serial.println("Connected to WiFi\n");
+    Serial.println("Connected to WiFi sucess!! \n");
 }
 
  /*发送结构
   {
-    "msg":msg,
-      "test":{
+    "sensor_name":name,
+      "sensor_data":{
       "msg":msg
       }
   }
   */
-String Json_msg(char *msg){
+String Json_msg(char *sensor_name,char *msg){
 
   cJSON *pRoot = cJSON_CreateObject();   
-  cJSON_AddStringToObject(pRoot,"msg",msg);
-  cJSON *test = cJSON_CreateObject(); 
-  cJSON_AddItemToObject(pRoot, "test",test);
-  cJSON_AddStringToObject(test,"msg",msg);
+  cJSON_AddStringToObject(pRoot,"sensor_name",sensor_name);
+  cJSON *status = cJSON_CreateObject(); 
+  cJSON_AddItemToObject(pRoot, "sensor_data",status);
+  // cJSON_AddStringToObject(status,"msg",msg);
+  cJSON_AddNumberToObject(pRoot,"data",2); 
  
   char *sendData = cJSON_Print(pRoot);
   String data(sendData);
 
   return data;
 }
+
+
 
 //未写完，还需要加入纠错反馈
 int Json_rcv(char *payload,std::vector<String> &Equipment_Control){
@@ -160,7 +183,7 @@ void connectToMQTT() {
         if (mqtt_client.connect(client_id.c_str(), mqtt_username, mqtt_password)) {
             Serial.println("Connected to MQTT broker");
             mqtt_client.subscribe(mqtt_topic_recv);
-            String send_data = Json_msg("Hi EMQX I'm ESP32 ^^");
+            String send_data = Json_msg(NULL,"Hi EMQX I'm ESP32 ^^");
             mqtt_client.publish(mqtt_topic_send, send_data.c_str()); // Publish message upon successful connection
         } 
         else {
@@ -201,24 +224,56 @@ void mqttCallback(char *mqtt_topic, byte *payload, unsigned int length) {
 }
 
 void setup() {
+
+  Serial.begin(9600);
   //驱动的setup以及创建设备的类（具体信息）
   // Boot_Equipment_list(Equipment_list,"motor",1);
   // Boot_Equipment_list(Equipment_list,"window",5);
-  Boot_Equipment_list(Equipment_list,"LED",led_pin,OUTPUT);
-
-  Serial.begin(9600);
+  // Boot_Equipment_list(Equipment_list,"LED",led_pin,OUTPUT);
+  // pinMode(ADC,ANALOG);
+  
+  // key_init();
+  
+  // Serial.begin(9600);
+  // dht.begin();
 
   connectToWiFi();
-  mqtt_client.setServer(mqtt_broker, mqtt_port);
-  mqtt_client.setKeepAlive(60);
-  mqtt_client.setCallback(mqttCallback); // Corrected callback function name
-  connectToMQTT();
+  // mqtt_client.setServer(mqtt_broker, mqtt_port);
+  // mqtt_client.setKeepAlive(60);
+  // mqtt_client.setCallback(mqttCallback); // Corrected callback function name
+  // connectToMQTT();
+
+  pinMode(ADC,ANALOG);     
+  pinMode(key,INPUT_PULLUP);
+  pinMode(led_pin,OUTPUT);      
+
+  timer = timerBegin(0, 80, true);    //  80M的时钟 80分频 1M
+  timerAlarmWrite(timer, 125, true);  //  1M  计125个数进中断  8K
+  timerAttachInterrupt(timer, &onTimer, true);
+  timerAlarmEnable(timer);
+  timerStop(timer);   //先暂停
+
 }
 
 void loop() {
-    if (!mqtt_client.connected()) {
-        connectToMQTT();
-    }
-    mqtt_client.loop();
-}
 
+  if(digitalRead(key)==0){
+
+    digitalWrite(led_pin,HIGH);
+    Baidu_msg = Json_msg_baidu(data_json,timer);
+    while (!digitalRead(key)); //等待按键松开
+    digitalWrite(led_pin,LOW);
+
+  }
+
+  // nlohmann::json Baidu_jsonData = nlohmann::json::parse(Baidu_msg);
+  // std::string Baidu_jsonData_str = Baidu_jsonData["result"];
+
+  // Serial.printf("Baidu_jsonData_str: %s\n",Baidu_jsonData_str.c_str());
+  // if (!mqtt_client.connected()) {
+  //     connectToMQTT();
+  // }
+  // mqtt_client.loop();
+
+  // cJSON_Delete(pJsonBaidu);  //释放内存
+} 
